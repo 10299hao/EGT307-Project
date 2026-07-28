@@ -536,7 +536,3 @@ Large datasets, generated models, `.env` files, passwords and webhook secrets mu
 - LogPAI, [HDFS_v1 dataset](https://github.com/logpai/loghub/tree/master/HDFS)
 - J. Zhu et al., [Loghub: A Large Collection of System Log Datasets for AI-driven Log Analytics](https://arxiv.org/abs/2008.06448), ISSRE 2023
 - W. Xu et al., [Detecting Large-Scale System Problems by Mining Console Logs](https://people.eecs.berkeley.edu/~jordan/papers/xu-etal-sosp09.pdf), SOSP 2009
-
-## Licence
-
-This repository is currently intended for academic use. A project licence will be added before wider public distribution.

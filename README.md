@@ -160,22 +160,52 @@ The evaluation will report:
 Recall is important because a missed anomaly may leave an infrastructure problem undetected. Precision is also monitored so that operators are not overwhelmed by false alerts.
 
 ## Initial system architecture
-
-```mermaid
 flowchart LR
-    Data["HDFS demo logs"] --> Collector["1. Log Collector"]
-    Collector -->|LogEvent| LogStream[("Redis log stream")]
-    LogStream --> Analyzer["2. Log Analyzer"]
-    Model["Saved AI model"] --> Analyzer
-    Analyzer -->|Incident| IncidentStream[("Redis incident stream")]
-    IncidentStream --> Executor["3. Automation Executor"]
-    IncidentStream --> Portal["4. Incident Portal and Notification"]
-    Executor -->|ActionResult| ResultStream[("Redis action-result stream")]
-    ResultStream --> Portal
-    Portal --> Database[("Incident history database")]
-    Portal --> Dashboard["Operator dashboard"]
-    Portal --> Webhook["Webhook notification"]
-```
+    %% INPUT
+    A["HDFS Demo Logs<br/>Historical labelled log data"]
+
+    %% FOUR APPLICATION SERVICES
+    S1["1. Log Collector<br/>Reads, validates and replays logs"]
+    S2["2. Log Analyzer — Core AI<br/>Groups events by BlockId<br/>Predicts normal or anomalous"]
+    S3["3. Automation Executor<br/>Selects an approved response<br/>Dry-run only"]
+    S4["4. Incident Portal<br/>Stores, displays and sends incidents"]
+
+    %% SUPPORTING COMPONENTS
+    R1[("Redis<br/>Log events")]
+    M[("Saved AI Model<br/>TF-IDF + classifier")]
+    R2[("Redis<br/>Incidents")]
+    R3[("Redis<br/>Action results")]
+    DB[("Incident History<br/>Database")]
+
+    %% USER OUTPUTS
+    UI["Operator Dashboard"]
+    WH["Webhook Notification"]
+
+    %% MAIN FLOW
+    A -->|"Raw log records"| S1
+    S1 -->|"Validated LogEvent"| R1
+    R1 --> S2
+    M -->|"Model and preprocessing"| S2
+    S2 -->|"Normal: record result"| S4
+    S2 -->|"Anomaly: Incident"| R2
+    R2 --> S3
+    R2 --> S4
+    S3 -->|"Safe ActionResult"| R3
+    R3 --> S4
+    S4 --> DB
+    S4 --> UI
+    S4 --> WH
+
+    %% STYLING
+    classDef service fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#111827
+    classDef ai fill:#fef3c7,stroke:#d97706,stroke-width:3px,color:#111827
+    classDef support fill:#f3f4f6,stroke:#6b7280,stroke-width:1px,color:#111827
+    classDef output fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#111827
+
+    class S1,S3,S4 service
+    class S2 ai
+    class R1,R2,R3,M,DB support
+    class UI,WH output
 
 Redis and the incident-history database are supporting infrastructure. The four numbered components are the application microservices.
 

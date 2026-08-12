@@ -1,1 +1,3 @@
 ﻿AI_APP_DATASET/
+__pycache__/
+*.pyc

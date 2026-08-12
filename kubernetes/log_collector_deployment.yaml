@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: log_collector
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: log-collector
+
+  template:
+    metadata:
+      labels:
+        app: log-collector
+
+    spec:
+      containers:
+        - name: log-collector
+          image: weijiee/log_collector:latest
+
+          imagePullPolicy: Always
+
+          env:
+            - name: REDIS_HOST
+              value: "redis"
+
+            - name: REDIS_PORT
+              value: "6379"
+
+            - name: REPLAY_SPEED
+              value: "0.1"
+
+          ports:
+            - containerPort: 8080
+
+---
+
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: log-collector
+
+spec:
+  selector:
+    app: log-collector
+
+  ports:
+    - port: 8080
+      targetPort: 8080
+
+  type: ClusterIP

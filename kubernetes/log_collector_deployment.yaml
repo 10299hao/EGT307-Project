@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 
 metadata:
-  name: log_collector
+  name: log-collector
 
 spec:
   replicas: 1
@@ -21,7 +21,7 @@ spec:
         - name: log-collector
           image: weijiee/log_collector:latest
 
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
 
           env:
             - name: REDIS_HOST

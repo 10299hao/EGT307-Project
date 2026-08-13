@@ -1,174 +1,87 @@
-import os
-import time
-import threading
+import redis
 import pandas as pd
-from pathlib import Path
+import time
+import json
+import os
+import re
 
-from validator import validate_row, create_log_event
-from redis_client import (
-    get_redis_client,
-    publish_event,
-    publish_dead_letter,
-    redis_is_ready
-)
-from api import run_api
+# 1. Setup Redis Connection
+REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
+REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
+REPLAY_SPEED = float(os.getenv('REPLAY_SPEED', '0.1')) 
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+CSV_PATH = os.path.join(current_dir, '../../data/demonstration_traces.csv')
+MEANING_PATH = os.path.join(current_dir, '../../data/EVENTID_MEANING.csv')
 
-# =========================
-# SETTINGS
-# =========================
+def load_event_templates():
+    print(f"Loading event translation key from {MEANING_PATH}...")
+    try:
+        df_meaning = pd.read_csv(MEANING_PATH)
+        templates = {}
+        for _, row in df_meaning.iterrows():
+            # Convert the [*] in the CSV into a regex wildcard .*
+            # This allows Python to ignore the dynamic IP addresses and block IDs
+            pattern = re.escape(row['EventTemplate']).replace(r'\[\*\]', '.*')
+            templates[row['EventId']] = re.compile(pattern)
+        return templates
+    except Exception as e:
+        print(f"Error loading EVENTID_MEANING.csv: {e}")
+        return {}
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-DATA_FILE = PROJECT_ROOT / "data" / "demonstration_traces.csv"
-
-REPLAY_SPEED = float(
-    os.getenv("REPLAY_SPEED", "0.1")
-)
-
-
-# =========================
-# MAIN
-# =========================
-
-def main():
-
-    print("Starting Log Collector...")
-
-
-    # -------------------------
-    # Start API
-    # -------------------------
-
-    api_thread = threading.Thread(
-        target=run_api,
-        daemon=True
-    )
-
-    api_thread.start()
-
-
-    # -------------------------
-    # Connect Redis
-    # -------------------------
-
-    redis_client = get_redis_client()
-
-    if not redis_is_ready(redis_client):
-        print("Redis is not available.")
+def stream_logs():
+    print(f"Connecting to Redis at {REDIS_HOST}:{REDIS_PORT}...")
+    try:
+        client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+        client.ping()
+        print("Connected to Redis!")
+    except Exception as e:
+        print(f"CRITICAL ERROR: Could not connect to Redis. {e}")
         return
 
-    print("Connected to Redis.")
+    print(f"Loading live log data from {CSV_PATH}...")
+    try:
+        df = pd.read_csv(CSV_PATH)
+    except FileNotFoundError:
+        print(f"Error: Could not find {CSV_PATH}.")
+        return
 
+    # Load the templates for translation
+    event_templates = load_event_templates()
 
-    # -------------------------
-    # Read demonstration CSV
-    # -------------------------
+    print("Calculating trace completion markers...")
+    last_indices = df.drop_duplicates(subset=['block_id'], keep='last').index
+    df['trace_complete'] = False
+    df.loc[last_indices, 'trace_complete'] = True
 
-    data = pd.read_csv(
-        DATA_FILE,
-        dtype=str
-    )
+    print("Beginning live log stream...")
+    
+    for index, row in df.iterrows():
+        try:
+            raw_message = str(row['message'])
+            mapped_event_id = "E1" # Default fallback
+            
+            # Translate the raw message using the Regex templates
+            for event_id, regex_pattern in event_templates.items():
+                if regex_pattern.search(raw_message):
+                    mapped_event_id = event_id
+                    break
 
-    # Keep original order
-    data["line_id"] = pd.to_numeric(
-        data["line_id"]
-    )
+            payload = {
+                "block_id": str(row['block_id']),
+                "event_id": mapped_event_id,
+                "trace_complete": bool(row['trace_complete']) 
+            }
 
-    data = data.sort_values(
-        "line_id"
-    ).reset_index(drop=True)
-
-
-    # -------------------------
-    # Find final row of each block
-    # -------------------------
-
-    last_rows = (
-        data
-        .reset_index()
-        .groupby("block_id")["index"]
-        .max()
-        .to_dict()
-    )
-
-
-    # -------------------------
-    # Replay logs
-    # -------------------------
-
-    for index, row in data.iterrows():
-
-        valid, reason = validate_row(row)
-
-
-        # Bad row
-        if not valid:
-
-            print(
-                f"Invalid event: {reason}"
-            )
-
-            publish_dead_letter(
-                redis_client,
-                row,
-                reason
-            )
-
-            continue
-
-
-        # Is this the last event
-        # belonging to this block?
-        block_id = row["block_id"]
-
-        trace_complete = (
-            index == last_rows[block_id]
-        )
-
-
-        # Create LogEvent
-        event = create_log_event(
-            row,
-            trace_complete
-        )
-
-
-        # Publish LogEvent
-        success = publish_event(
-            redis_client,
-            event
-        )
-
-
-        if not success:
-
-            publish_dead_letter(
-                redis_client,
-                row,
-                "Redis publishing failed"
-            )
-
-
-        if trace_complete:
-
-            print(
-                f"Trace complete: {block_id}"
-            )
-
-
-        # Replay speed
-        time.sleep(REPLAY_SPEED)
-
-
-    print("Log replay completed.")
-
-# Keep the service running after replay finishes
-    api_thread.join()
-
-# =========================
-# RUN
-# =========================
+            client.xadd('log-events', {'data': json.dumps(payload)})
+            
+            print(f"Sent: {payload['block_id']} | {payload['event_id']} | Complete: {payload['trace_complete']}")
+            time.sleep(REPLAY_SPEED)
+            
+        except Exception as e:
+            print(f"Failed to send log: {e}")
+            time.sleep(1)
 
 if __name__ == "__main__":
-    main()
+    time.sleep(3)
+    stream_logs()

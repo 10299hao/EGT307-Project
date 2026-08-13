@@ -14,7 +14,6 @@ spec:
     spec:
       containers:
         - name: log-analyzer
-          # Make sure this matches whatever you name the image when you build it!
           image: danish/log-analyzer:latest 
           imagePullPolicy: IfNotPresent 
           env:

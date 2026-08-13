@@ -1,4 +1,31 @@
-﻿AI_APP_DATASET/
-__pycache__/
-*.pyc
+﻿# Local datasets and generated model artifacts
+AI_APP_DATASET/
 data/HDFS.npz
+data/raw/
+data/processed/
+models/*.joblib
+models/*.pkl
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Local configuration and secrets
+.env
+
+# Generated analysis outputs
+reports/figures/
+
+# Frontend and Portal runtime files
+node_modules/
+.pnpm-store/
+dist/
+services/portal/data/
+.test-tmp*/
+services/portal/**/verify-*.log
+*.db
+*.db-shm
+*.db-wal
+tmp/

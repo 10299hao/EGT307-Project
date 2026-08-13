@@ -1,0 +1,112 @@
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-integrated-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  analyzer:
+    build:
+      context: ../..
+      dockerfile: services/portal/integration/analyzer.Dockerfile
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  integration-bridge:
+    build:
+      context: ./integration
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      SOURCE_STREAM: log-events
+      SOURCE_FIELD: data
+      TARGET_STREAM: LogStream
+      TARGET_FIELD: payload
+      BRIDGE_CONSUMER_GROUP: portal-integration-bridge-v3
+      STARTUP_DELAY_SECONDS: "20"
+    depends_on:
+      redis:
+        condition: service_healthy
+      analyzer:
+        condition: service_started
+    restart: unless-stopped
+
+  collector:
+    build:
+      context: ../..
+      dockerfile: log-collector/Dockerfile
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      LOG_STREAM: log-events
+      REPLAY_SPEED: "0.03"
+    volumes:
+      - ../../data/demonstration_traces.csv:/data/demonstration_traces.csv:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      integration-bridge:
+        condition: service_started
+
+  executor:
+    build:
+      context: ../..
+      dockerfile: services/portal/integration/executor.Dockerfile
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  portal:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      PORTAL_DATABASE_PATH: /app/data/portal.db
+      REDIS_URL: redis://redis:6379/0
+      ENABLE_REDIS: "true"
+      SEED_DEMO_DATA: "false"
+      INCIDENT_STREAM: IncidentStream
+      INCIDENT_STREAM_ALIASES: incidents
+      ACTION_RESULT_STREAM: action-results
+      ACTION_REQUEST_STREAM: ActionStream
+      ACTION_REQUEST_FIELD: command
+      ENABLE_EXECUTOR: "true"
+      COLLECTOR_OUTPUT_STREAM: log-events
+      COLLECTOR_MESSAGE_FIELD: data
+      ANALYZER_INPUT_STREAM: LogStream
+      ANALYZER_MESSAGE_FIELD: payload
+      COLLECTOR_HEALTH_URL: http://collector:8080/health
+      BRIDGE_HEARTBEAT_KEY: portal-integration-bridge:heartbeat
+      LOCAL_NOTIFICATION_URL: ${LOCAL_NOTIFICATION_URL:-}
+    volumes:
+      - portal-integrated-data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      analyzer:
+        condition: service_started
+      integration-bridge:
+        condition: service_started
+      executor:
+        condition: service_started
+
+volumes:
+  redis-integrated-data:
+  portal-integrated-data:

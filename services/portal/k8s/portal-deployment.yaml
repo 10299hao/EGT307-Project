@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incident-portal
+  labels:
+    app: incident-portal
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: incident-portal
+  template:
+    metadata:
+      labels:
+        app: incident-portal
+    spec:
+      containers:
+        - name: incident-portal
+          image: your-dockerhub-name/logsentinel-portal:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: PORTAL_DATABASE_PATH
+              value: /app/data/portal.db
+            - name: REDIS_URL
+              value: redis://redis:6379/0
+            - name: ENABLE_REDIS
+              value: "true"
+            - name: SEED_DEMO_DATA
+              value: "false"
+            - name: INCIDENT_STREAM
+              value: IncidentStream
+            - name: INCIDENT_STREAM_ALIASES
+              value: incidents
+            - name: ACTION_RESULT_STREAM
+              value: action-results
+            - name: COLLECTOR_OUTPUT_STREAM
+              value: log-events
+            - name: COLLECTOR_MESSAGE_FIELD
+              value: data
+            - name: ANALYZER_INPUT_STREAM
+              value: LogStream
+            - name: ANALYZER_MESSAGE_FIELD
+              value: payload
+          readinessProbe:
+            httpGet:
+              path: /api/health/ready
+              port: 8000
+            initialDelaySeconds: 8
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health/live
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+          volumeMounts:
+            - name: portal-data
+              mountPath: /app/data
+      volumes:
+        - name: portal-data
+          persistentVolumeClaim:
+            claimName: portal-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: incident-portal
+spec:
+  selector:
+    app: incident-portal
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+  type: NodePort

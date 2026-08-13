@@ -1,0 +1,15 @@
+# Use Python 3.11 to avoid the 3.12 distutils removal issue
+FROM python:3.11-slim
+
+# Set the working directory inside the container
+WORKDIR /app
+
+# Copy dependencies and install them
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the actual source code
+COPY src/ ./src/
+
+# Set the default command to wake up the Executor
+CMD ["python", "src/main.py"]

@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: executor-app
+  labels:
+    app: executor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: executor
+  template:
+    metadata:
+      labels:
+        app: executor
+    spec:
+      containers:
+      - name: executor-container
+        image: executor:latest
+        imagePullPolicy: Never
+        env:
+        # Point this to the name of your Kubernetes Redis Service
+        - name: REDIS_HOST
+          value: "redis-service"
+        - name: REDIS_PORT
+          value: "6379"

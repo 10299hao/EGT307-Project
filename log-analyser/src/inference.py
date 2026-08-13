@@ -14,6 +14,8 @@ try:
 except Exception as e:
     print(f"CRITICAL ERROR: Could not load models. Did you run train.py first? Error: {e}")
 
+ANOMALY_THRESHOLD = float(os.getenv('ANOMALY_THRESHOLD', '0.40'))
+
 def evaluate_trace(block_id, event_list):
     sequence_str = " ".join(event_list)
     X_tfidf = vectorizer.transform([sequence_str])
@@ -23,17 +25,23 @@ def evaluate_trace(block_id, event_list):
     probabilities = model.predict_proba(X_tfidf)[0]
     
     if prediction == 1: 
-        # probabilities[1] is the confidence that it is an Anomaly
         confidence = round(probabilities[1] * 100, 2)
-        
+
+        if confidence > 90:
+            severity = "Critical"
+        elif confidence > 75:
+            severity = "High"
+        elif confidence > 60:
+            severity = "Medium"
+        else:
+            severity = "Low"
+
         incident = {
             "incident_id": str(uuid.uuid4()),
             "block_id": block_id,
             "status": "Anomaly",
             "confidence_score": float(confidence),
-            "severity": "High" if confidence > 90 else "Medium",
-            "total_events_analyzed": len(event_list),
-            "evidence": sequence_str 
+            "severity": severity,
         }
         print(f"🚨 ANOMALY DETECTED: {block_id} (Confidence: {confidence}%)")
         return incident

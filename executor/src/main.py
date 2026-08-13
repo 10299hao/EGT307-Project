@@ -3,6 +3,8 @@ import json
 import time
 import os
 
+from results_publisher import publish_action_result
+
 REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
 REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
 
@@ -43,7 +45,17 @@ def listen_for_actions():
                         print("Status: Rerouting network traffic...")
                         time.sleep(1)
                         print(f"✅ Mitigation Complete! Incident {incident_id} has been neutralized.")
-                        
+
+                        # Report the outcome back to the Portal so it shows on the dashboard
+                        publish_action_result(
+                            client,
+                            incident_id=incident_id,
+                            action=action,
+                            status="completed",
+                            reason=f"Dry-run '{action}' executed by Automation Executor.",
+                            command=f"simulate:{action}",
+                        )
+
                         # Update the ID so we don't process the same alert twice
                         last_id = message_id
                         print("\n🛡️  Resuming watch...")

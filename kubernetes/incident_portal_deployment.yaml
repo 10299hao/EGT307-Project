@@ -40,9 +40,15 @@ spec:
             - name: COLLECTOR_MESSAGE_FIELD
               value: data
             - name: ANALYZER_INPUT_STREAM
-              value: LogStream
+              value: log-events
             - name: ANALYZER_MESSAGE_FIELD
-              value: payload
+              value: data
+            - name: ENABLE_EXECUTOR
+              value: "true"
+            - name: ACTION_REQUEST_STREAM
+              value: ActionStream
+            - name: ACTION_REQUEST_FIELD
+              value: command
           readinessProbe:
             httpGet:
               path: /api/health/ready

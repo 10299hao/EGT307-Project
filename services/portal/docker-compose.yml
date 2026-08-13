@@ -24,24 +24,6 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  integration-bridge:
-    build:
-      context: ./integration
-    environment:
-      REDIS_URL: redis://redis:6379/0
-      SOURCE_STREAM: log-events
-      SOURCE_FIELD: data
-      TARGET_STREAM: LogStream
-      TARGET_FIELD: payload
-      BRIDGE_CONSUMER_GROUP: portal-integration-bridge-v3
-      STARTUP_DELAY_SECONDS: "20"
-    depends_on:
-      redis:
-        condition: service_healthy
-      analyzer:
-        condition: service_started
-    restart: unless-stopped
-
   collector:
     build:
       context: ../..
@@ -58,8 +40,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      integration-bridge:
-        condition: service_started
 
   executor:
     build:
@@ -90,10 +70,9 @@ services:
       ENABLE_EXECUTOR: "true"
       COLLECTOR_OUTPUT_STREAM: log-events
       COLLECTOR_MESSAGE_FIELD: data
-      ANALYZER_INPUT_STREAM: LogStream
-      ANALYZER_MESSAGE_FIELD: payload
+      ANALYZER_INPUT_STREAM: log-events
+      ANALYZER_MESSAGE_FIELD: data
       COLLECTOR_HEALTH_URL: http://collector:8080/health
-      BRIDGE_HEARTBEAT_KEY: portal-integration-bridge:heartbeat
       LOCAL_NOTIFICATION_URL: ${LOCAL_NOTIFICATION_URL:-}
     volumes:
       - portal-integrated-data:/app/data
@@ -101,8 +80,6 @@ services:
       redis:
         condition: service_healthy
       analyzer:
-        condition: service_started
-      integration-bridge:
         condition: service_started
       executor:
         condition: service_started

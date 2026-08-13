@@ -1,18 +1,27 @@
-import redis
 import pandas as pd
 import time
-import json
 import os
 import re
+import threading
 
-# 1. Setup Redis Connection
-REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
-REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
-REPLAY_SPEED = float(os.getenv('REPLAY_SPEED', '0.1')) 
+from api import run_api
+from validator import validate_row
+from redis_client import (
+    get_redis_client,
+    publish_event,
+    publish_dead_letter,
+    redis_is_ready,
+)
+
+REPLAY_SPEED = float(os.getenv('REPLAY_SPEED', '0.1'))
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
-CSV_PATH = os.path.join(current_dir, '../../data/demonstration_traces.csv')
-MEANING_PATH = os.path.join(current_dir, '../../data/EVENTID_MEANING.csv')
+DEFAULT_CSV_PATH = os.path.join(current_dir, '../../data/demonstration_traces.csv')
+DEFAULT_MEANING_PATH = os.path.join(current_dir, '../../data/EVENTID_MEANING.csv')
+
+CSV_PATH = os.getenv('CSV_PATH', DEFAULT_CSV_PATH)
+MEANING_PATH = os.getenv('MEANING_PATH', DEFAULT_MEANING_PATH)
+
 
 def load_event_templates():
     print(f"Loading event translation key from {MEANING_PATH}...")
@@ -20,8 +29,6 @@ def load_event_templates():
         df_meaning = pd.read_csv(MEANING_PATH)
         templates = {}
         for _, row in df_meaning.iterrows():
-            # Convert the [*] in the CSV into a regex wildcard .*
-            # This allows Python to ignore the dynamic IP addresses and block IDs
             pattern = re.escape(row['EventTemplate']).replace(r'\[\*\]', '.*')
             templates[row['EventId']] = re.compile(pattern)
         return templates
@@ -29,15 +36,22 @@ def load_event_templates():
         print(f"Error loading EVENTID_MEANING.csv: {e}")
         return {}
 
+
+def map_event_id(raw_message, event_templates):
+    """Translate a raw HDFS message into its E1-E29 template ID."""
+    for event_id, regex_pattern in event_templates.items():
+        if regex_pattern.search(raw_message):
+            return event_id
+    return "E1"  # Default fallback if nothing matches
+
+
 def stream_logs():
-    print(f"Connecting to Redis at {REDIS_HOST}:{REDIS_PORT}...")
-    try:
-        client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
-        client.ping()
-        print("Connected to Redis!")
-    except Exception as e:
-        print(f"CRITICAL ERROR: Could not connect to Redis. {e}")
+    print("Connecting to Redis...")
+    client = get_redis_client()
+    if not redis_is_ready(client):
+        print("CRITICAL ERROR: Could not connect to Redis.")
         return
+    print("Connected to Redis!")
 
     print(f"Loading live log data from {CSV_PATH}...")
     try:
@@ -46,7 +60,6 @@ def stream_logs():
         print(f"Error: Could not find {CSV_PATH}.")
         return
 
-    # Load the templates for translation
     event_templates = load_event_templates()
 
     print("Calculating trace completion markers...")
@@ -55,33 +68,32 @@ def stream_logs():
     df.loc[last_indices, 'trace_complete'] = True
 
     print("Beginning live log stream...")
-    
-    for index, row in df.iterrows():
-        try:
-            raw_message = str(row['message'])
-            mapped_event_id = "E1" # Default fallback
-            
-            # Translate the raw message using the Regex templates
-            for event_id, regex_pattern in event_templates.items():
-                if regex_pattern.search(raw_message):
-                    mapped_event_id = event_id
-                    break
 
-            payload = {
-                "block_id": str(row['block_id']),
-                "event_id": mapped_event_id,
-                "trace_complete": bool(row['trace_complete']) 
-            }
+    for _, row in df.iterrows():
+        is_valid, reason = validate_row(row)
+        if not is_valid:
+            publish_dead_letter(client, row, reason)
+            continue
 
-            client.xadd('log-events', {'data': json.dumps(payload)})
-            
-            print(f"Sent: {payload['block_id']} | {payload['event_id']} | Complete: {payload['trace_complete']}")
-            time.sleep(REPLAY_SPEED)
-            
-        except Exception as e:
-            print(f"Failed to send log: {e}")
-            time.sleep(1)
+        raw_message = str(row['message'])
+        mapped_event_id = map_event_id(raw_message, event_templates)
+
+        event = {
+            "block_id": str(row['block_id']),
+            "event_id": mapped_event_id,
+            "trace_complete": bool(row['trace_complete']),
+        }
+
+        sent = publish_event(client, event)
+        if sent:
+            print(f"Sent: {event['block_id']} | {event['event_id']} | Complete: {event['trace_complete']}")
+        else:
+            publish_dead_letter(client, row, "Redis publish failed after retries")
+
+        time.sleep(REPLAY_SPEED)
+
 
 if __name__ == "__main__":
+    threading.Thread(target=run_api, daemon=True).start()
     time.sleep(3)
     stream_logs()

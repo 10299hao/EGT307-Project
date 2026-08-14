@@ -36,21 +36,36 @@ class StreamConsumer:
                     raise
 
     async def run(self) -> None:
-        """Poll all Portal input streams until application shutdown."""
-        await self.ensure_groups()
+        """Poll all Portal input streams until application shutdown.
+
+        Wrapped in a retry loop: a transient Redis issue (brief network
+        blip, not-ready-yet on startup, etc.) must not permanently kill
+        this background task. Without this, an unhandled exception here
+        silently ends the task forever with nothing printed anywhere,
+        while the rest of the app keeps running and just never
+        receives any data again.
+        """
         self.running = True
         while self.running:
-            messages = await self.redis.xreadgroup(
-                self.config.consumer_group,
-                self.config.consumer_name,
-                {stream: ">" for stream in (*self.config.incident_streams, self.config.action_result_stream)},
-                count=10,
-                block=2000,
-            )
-            for stream, entries in messages:
-                for message_id, fields in entries:
-                    await self._handle(stream, message_id, fields)
-
+            try:
+                await self.ensure_groups()
+                while self.running:
+                    messages = await self.redis.xreadgroup(
+                        self.config.consumer_group,
+                        self.config.consumer_name,
+                        {stream: ">" for stream in (*self.config.incident_streams, self.config.action_result_stream)},
+                        count=10,
+                        block=2000,
+                    )
+                    for stream, entries in messages:
+                        for message_id, fields in entries:
+                            await self._handle(stream, message_id, fields)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Portal stream consumer crashed, retrying in 5 seconds")
+                await asyncio.sleep(5)
+                
     async def _handle(self, stream: str, message_id: str, fields: dict[str, str]) -> None:
         try:
             raw = fields.get("payload") or fields.get("data") or json.dumps(fields)

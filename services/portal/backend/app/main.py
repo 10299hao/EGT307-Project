@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -17,6 +18,8 @@ from .demo_data import seed
 from .executor import dispatch_action_request
 from .notifications import send_local_notification
 from .schemas import AcknowledgeIn, ActionResultIn, IncidentIn
+
+logging.basicConfig(level=logging.INFO)
 
 
 database = PortalDatabase(settings.database_path)

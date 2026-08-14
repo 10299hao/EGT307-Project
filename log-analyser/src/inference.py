@@ -20,11 +20,10 @@ def evaluate_trace(block_id, event_list):
     sequence_str = " ".join(event_list)
     X_tfidf = vectorizer.transform([sequence_str])
     
-    # Get both the prediction (0 or 1) and the probability scores for both classes
-    prediction = model.predict(X_tfidf)[0]
     probabilities = model.predict_proba(X_tfidf)[0]
+    prediction = 1 if probabilities[1] >= ANOMALY_THRESHOLD else 0
     
-    if prediction == 1: 
+    if prediction == 1:
         confidence = round(probabilities[1] * 100, 2)
 
         if confidence > 90:

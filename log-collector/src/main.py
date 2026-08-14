@@ -96,4 +96,7 @@ def stream_logs():
 if __name__ == "__main__":
     threading.Thread(target=run_api, daemon=True).start()
     time.sleep(3)
-    stream_logs()
+    while True:
+        stream_logs()
+        print("Replay finished. Restarting the stream from the beginning in 10 seconds...")
+        time.sleep(10)

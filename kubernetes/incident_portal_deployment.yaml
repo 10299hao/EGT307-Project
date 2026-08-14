@@ -21,6 +21,8 @@ spec:
           ports:
             - containerPort: 8000
           env:
+            - name: COLLECTOR_HEALTH_URL
+              value: http://log-collector:8080/health
             - name: PORTAL_DATABASE_PATH
               value: /app/data/portal.db
             - name: REDIS_URL

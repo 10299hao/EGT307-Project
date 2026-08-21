@@ -1,559 +1,470 @@
-## Automated Incident Triage for Cloud Infrastructure
+# LogSentinel: Automated Incident Triage for HDFS
 
-This is an AI-powered DevOps automation project that helps operators investigate HDFS infrastructure incidents. The system collects server logs, detects unusual block activity, prepares a readable incident summary and selects a safe response from an approved action list.
+LogSentinel is an AI-assisted DevOps prototype that turns HDFS log records into useful incident reports. It collects and validates log data, groups related events by HDFS block, detects anomalous event sequences with a trained machine-learning model, recommends a safe dry-run response, and displays the result in an operator dashboard.
 
+The purpose of the system is to reduce the time an operator spends reading thousands of raw log lines. It supports the operator's decision; it does not replace the operator or execute unrestricted commands.
 
-## Project overview
+## Project status
 
-Large infrastructure systems generate more log messages than an operator can realistically read during an incident. A single failure may be spread across many lines, processes and components, which makes the root cause difficult to find quickly.
+The four main microservices, Redis integration, Dockerfiles, Kubernetes manifests, saved AI model and Incident Portal have been implemented.
 
-This is intended to shorten this first stage of troubleshooting. It replays HDFS logs as if they are arriving from a server, groups related events using their block ID and uses a machine-learning model to decide whether the activity is normal or anomalous.
-
-When an anomaly is found, the system prepares an incident record containing the affected block, model confidence, important events and a recommended response. All mitigation commands are simulated in dry-run mode for safety.
-
-## Problem statement
-
-System administrators and DevOps teams often need to search through very large log files when a service becomes slow, unavailable or unstable. Manual log investigation takes time and may produce inconsistent results, especially when the operator is working under pressure.
-
-This project addresses the problem by automating four parts of the initial incident response:
-
-1. collecting and organising incoming log messages;
-2. detecting abnormal behaviour with an AI model;
-3. selecting a controlled first-response action; and
-4. notifying the operator with a structured summary.
-
-This is relevant to the engineering industry because fast incident detection can reduce service downtime, shorten investigation time and help teams respond more consistently.
-
-## Project objectives
-
-- Build an AI application that detects anomalous HDFS block traces.
-- Replay historical HDFS logs to simulate a live infrastructure environment.
-- Group related log events by `BlockId` before performing analysis.
-- Show the model result together with confidence and supporting events.
-- Map recognised incidents to an approved mitigation action.
-- Keep all project commands in dry-run mode unless they are explicitly approved.
-- Send a structured incident summary to a dashboard and webhook.
-- Design the application as four independent microservices.
-- Make the architecture modular, scalable and fault tolerant.
-- Track team progress and individual contributions through Git.
-
-## Target users
-
-### System administrators
-
-System administrators can use the incident summary to find the relevant HDFS activity without reading the full log file line by line.
-
-### DevOps engineers
-
-DevOps engineers can use the model result and suggested action as a starting point when deciding how to recover an affected service.
-
-### Site Reliability Engineers
-
-Site Reliability Engineers can review the anomaly evidence, severity and action history as part of a repeatable incident-response process.
-
-### Organisations operating distributed infrastructure
-
-Teams running storage clusters, cloud services or other distributed systems can use the project as a proof of concept for AI-assisted operations.
-
-## Expected outcomes
-
-The completed project should provide:
-
-- a functional application that processes HDFS logs from collection to notification;
-- an evaluated AI model for normal-versus-anomalous block detection;
-- a readable explanation of the events connected to an incident;
-- a safe, policy-based response that does not accept unrestricted commands;
-- a dashboard or webhook summary that helps an operator make a decision;
-- four independently testable application services;
-- Docker images for all microservices;
-- a Minikube deployment with at least one scaled service; and
-- clear documentation that another developer can follow.
-
-The aim is not to replace an operator. The expected result is a decision-support tool that reduces the amount of raw data the operator needs to inspect and provides a consistent starting point for investigation.
-
-## Main features
-
-- HDFS log replay at a configurable speed
-- Block-level event grouping
-- AI-based anomaly detection
-- Confidence score and evidence events
-- Human-readable incident categories
-- Severity and action mapping
-- Dry-run mitigation commands
-- Incident history
-- Dashboard and webhook notification
-- Independent service deployment
-
-## Dataset
-
-This project uses the [LogHub HDFS_v1 dataset](https://github.com/logpai/loghub/tree/master/HDFS). It contains logs collected from a Hadoop Distributed File System environment and provides normal or anomaly labels for individual HDFS block traces.
-
-### Dataset summary
-
-| Item | Value |
-|---|---:|
-| Raw log records | 11,175,629 |
-| Labelled block traces | 575,061 |
-| Normal traces | 558,223 |
-| Anomalous traces | 16,838 |
-| Event templates | 29 |
-
-### Prepared files
-
-| File | Purpose |
+| Area | Current implementation |
 |---|---|
-| `HDFS_LOGCOLLECTOR.csv` | Structured raw records that the Log Collector can replay. |
-| `preprocessed/AI_TRAINING_DATA.csv` | Ordered event sequences grouped by HDFS block for model training. |
-| `preprocessed/anomaly_label.csv` | Official normal or anomaly label for every block ID. |
-| `preprocessed/EVENTID_MEANING.csv` | Maps event IDs to readable HDFS event descriptions. |
-| `preprocessed/Event_occurrence_matrix.csv` | Event-count features for a comparison model. |
-| `preprocessed/HDFS.npz` | Optional numerical features supplied with the dataset. |
+| Log collection | CSV upload, validation, event mapping and Redis publishing |
+| AI analysis | TF-IDF and class-weighted Logistic Regression |
+| Automation | Approved action simulation in dry-run mode |
+| Incident management | React dashboard, FastAPI API and SQLite history |
+| Communication | Redis Streams |
+| Containerisation | One Dockerfile for each microservice |
+| Orchestration | Minikube/Kubernetes manifests and Analyzer HPA |
+| Notifications | Optional Windows desktop notification receiver |
 
-The full dataset is too large for GitHub and should not be committed to the repository. Preparation instructions and scripts should be committed instead, while local data stays in an ignored data folder.
+## Simple explanation
 
-### How the dataset is used
+The project works like a small incident-response team:
 
-The dataset has two roles:
+1. The **Log Collector** reads and checks the HDFS log records.
+2. The **Log Analyzer** uses the AI model to decide whether each completed block trace is normal or anomalous.
+3. The **Incident Portal** saves an anomaly, shows it to the operator and requests a suitable dry-run action.
+4. The **Automation Executor** simulates the action and reports the result to the Portal.
 
-**Model development**
+Redis Streams acts as the shared message channel. Each microservice runs independently and does not need to import another member's source code.
 
-```text
-AI_TRAINING_DATA.csv + anomaly_label.csv
-        -> clean event sequences
-        -> split unique block IDs
-        -> extract features
-        -> train and validate model
-        -> save selected model
-```
+## System architecture
 
-**Application demonstration**
-
-```text
-HDFS_LOGCOLLECTOR.csv
-        -> select complete demo block traces
-        -> replay messages in original order
-        -> send events to Log Analyzer
-```
-
-Training, validation and test data will be split by `BlockId`. This prevents events from the same HDFS block from appearing in more than one split.
-
-## AI approach
-
-The core AI task is block-level anomaly detection. The model receives an ordered sequence of HDFS event IDs belonging to one block and predicts whether that trace is normal or anomalous.
-
-The initial baseline uses:
-
-- TF-IDF features from event sequences;
-- unigram and bigram event patterns; and
-- class-weighted Logistic Regression.
-
-A second approach using the event-occurrence matrix will be compared with the sequence baseline. The final model will be selected using validation results rather than accuracy alone.
-
-The evaluation will report:
-
-- precision;
-- recall;
-- F1 score;
-- PR-AUC; and
-- confusion matrix.
-
-Recall is important because a missed anomaly may leave an infrastructure problem undetected. Precision is also monitored so that operators are not overwhelmed by false alerts.
-
-## Initial system architecture
 ```mermaid
 flowchart LR
-    Logs["HDFS Demo Logs"]
+    Data["HDFS demonstration CSV"]
+    Collector["Log Collector<br/>Wei Jie"]
+    LogStream[("Redis: log-events")]
+    Analyzer["Log Analyzer + AI<br/>Danish"]
+    IncidentStream[("Redis: IncidentStream")]
+    Portal["Incident Portal<br/>Minghao"]
+    Database[("SQLite incident history")]
+    Dashboard["Operator dashboard"]
+    ActionStream[("Redis: ActionStream")]
+    Executor["Automation Executor<br/>Ethan"]
+    ResultStream[("Redis: action-results")]
+    Notification["Optional desktop alert"]
 
-    Collector["1. Log Collector<br/>Validate and replay logs"]
-    Analyzer["2. Log Analyzer<br/>Core AI Service<br/>Group events and predict"]
-    Executor["3. Automation Executor<br/>Select safe dry-run action"]
-    Portal["4. Incident Portal<br/>Store, display and notify"]
-
-    LogStream[("Redis Log Stream")]
-    Model[("Saved AI Pipeline")]
-    IncidentStream[("Redis Incident Stream")]
-    ResultStream[("Redis Action Result Stream")]
-    Database[("Incident History Database")]
-
-    Dashboard["Operator Dashboard"]
-    Webhook["Webhook Notification"]
-
-    Logs -->|"Raw log records"| Collector
-    Collector -->|"LogEvent"| LogStream
+    Data -->|"upload"| Collector
+    Collector -->|"data"| LogStream
     LogStream --> Analyzer
-    Model -->|"Load model"| Analyzer
-    Analyzer -->|"Incident"| IncidentStream
-    IncidentStream --> Executor
+    Analyzer -->|"payload"| IncidentStream
     IncidentStream --> Portal
-    Executor -->|"ActionResult"| ResultStream
-    ResultStream --> Portal
     Portal --> Database
     Portal --> Dashboard
-    Portal --> Webhook
-
-    classDef service fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#111827
-    classDef ai fill:#fef3c7,stroke:#d97706,stroke-width:3px,color:#111827
-    classDef support fill:#f3f4f6,stroke:#6b7280,stroke-width:1px,color:#111827
-    classDef output fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#111827
-
-    class Collector,Executor,Portal service
-    class Analyzer ai
-    class LogStream,Model,IncidentStream,ResultStream,Database support
-    class Dashboard,Webhook output
+    Portal --> Notification
+    Portal -->|"command"| ActionStream
+    ActionStream --> Executor
+    Executor -->|"payload"| ResultStream
+    ResultStream --> Portal
 ```
 
-Redis and the incident-history database are supporting infrastructure. The four numbered components are the application microservices.
+### End-to-end workflow
 
-### End-to-end flow
+1. A user uploads `data/demonstration_traces.csv` to the Collector's `/ingest` endpoint.
+2. The Collector validates every row. Invalid rows are sent to `log-events-dead-letter`.
+3. Valid messages are mapped to HDFS event IDs such as `E4` and published to `log-events`.
+4. The Analyzer buffers event IDs by `block_id` until `trace_complete` is true.
+5. The saved TF-IDF vectorizer converts the event sequence into numerical features.
+6. Logistic Regression predicts whether the trace is normal or anomalous.
+7. Normal traces are logged and require no response. Anomalies are published to `IncidentStream` with a confidence score and evidence.
+8. The Portal converts the Analyzer message into its validated incident format, stores it in SQLite and displays it on the dashboard.
+9. The Portal maps the incident category to an approved action and publishes the request to `ActionStream`.
+10. The Executor simulates the action in dry-run mode and publishes an `ActionResult` to `action-results`.
+11. The Portal joins the result to the original incident using `incident_id`. The operator can inspect and acknowledge the completed record.
 
-1. The Log Collector reads selected HDFS messages in their original order.
-2. Each message is published as a versioned `LogEvent`.
-3. The Log Analyzer groups events by block ID and applies the saved model.
-4. An anomalous trace produces a structured `Incident`.
-5. The Automation Executor checks the incident against the action policy.
-6. The executor returns an `ActionResult` containing the simulated command and status.
-7. The Incident Portal combines the analysis and action result.
-8. The completed incident is stored, displayed and sent to a webhook.
+## Team responsibilities
 
-## Planned microservices
+| Team member | Owned microservice | Main work completed |
+|---|---|---|
+| **Minghao** | Incident Portal | FastAPI backend, SQLite storage, React dashboard, Redis consumers, Analyzer adapter, Executor request publishing, incident acknowledgement and optional desktop alerts |
+| **Danish** | Log Analyzer and AI model | Block buffering, TF-IDF preprocessing, Logistic Regression training/inference, confidence scoring, evidence reporting and anomaly publishing |
+| **Wei Jie** | Log Collector | File-upload API, record validation, HDFS event-template mapping, configurable replay, retry handling and dead-letter publishing |
+| **Ethan** | Automation Executor | Action request consumer, dry-run response simulation and action-result publishing back to the Portal |
+
+## Implemented microservices
 
 ### 1. Log Collector
 
-The Log Collector simulates a live server by reading a smaller HDFS demo file one row at a time.
+The Collector is a Flask service on port `8080`. It accepts an HDFS CSV upload instead of relying on a hard-coded local file.
 
-Main responsibilities:
+Main functions:
 
-- preserve the original log order;
-- apply a configurable replay delay;
-- validate required fields;
-- publish `LogEvent` messages; and
-- retry temporary connection failures.
+- exposes `/health`, `/ready`, `/ingest` and `/ingest/status/<job_id>`;
+- validates required fields, timestamps, log levels and block IDs;
+- maps raw HDFS messages to event-template IDs using `data/EVENTID_MEANING.csv`;
+- marks the final record for each block with `trace_complete`;
+- publishes valid records to Redis with retry handling; and
+- keeps invalid records in a dead-letter stream for checking.
 
-### 2. Log Analyzer
+### 2. Log Analyzer and AI model
 
-The Log Analyzer contains the core AI functionality.
+The Analyzer listens to the Collector's `log-events` stream. It groups event IDs by block, loads the saved vectorizer and model, and performs inference when a block trace is complete.
 
-Main responsibilities:
+Main functions:
 
-- consume log events;
-- group events using `BlockId`;
-- load the saved preprocessing and model pipeline;
-- predict normal or anomalous behaviour;
-- identify useful evidence events; and
-- publish a structured incident.
+- consumes `block_id`, `event_id` and `trace_complete`;
+- reconstructs an ordered event sequence for each block;
+- transforms the sequence with the saved TF-IDF vectorizer;
+- predicts normal or anomaly with Logistic Regression using the configured anomaly threshold;
+- reports anomaly confidence, severity, event count and evidence; and
+- publishes anomalies to `IncidentStream`.
 
-### 3. Automation Executor
+### 3. Incident Portal
 
-The Automation Executor converts an approved incident category into a safe, simulated response.
+The Portal is the control and presentation layer. Its FastAPI backend receives live Redis messages and serves the built React dashboard on port `8000`.
 
-Main responsibilities:
+Main functions:
 
-- apply confidence and severity rules;
-- select actions from an allow-list;
-- reject unknown or unrestricted commands;
-- prevent the same incident from triggering twice; and
-- record every action in dry-run mode.
+- validates and normalises Danish's Analyzer output;
+- maps evidence events to readable incident categories and recommended actions;
+- stores incidents, action requests, action results, acknowledgements and notification attempts in SQLite;
+- prevents duplicate incident and action processing;
+- provides overview, incident history, activity and system-status pages;
+- lets the operator search, filter, inspect and acknowledge incidents;
+- sends action requests to Ethan's Executor; and
+- can call a local Windows notification receiver for new incidents.
 
-Example:
+More Portal-specific details are available in [`services/portal/PORTAL_README.md`](services/portal/PORTAL_README.md).
 
-```text
-DRY RUN: kubectl rollout restart deployment/hdfs-datanode
-```
+### 4. Automation Executor
 
-### 4. Incident Portal and Notification
+The Executor listens for approved requests from the Portal. It does not accept an AI-generated shell command and does not make a real infrastructure change.
 
-The Incident Portal provides the user-facing part of the application.
+Main functions:
 
-Main responsibilities:
+- consumes `incident_id` and `action` from `ActionStream`;
+- simulates the response steps in dry-run mode;
+- creates a versioned action result with a unique ID and timestamp; and
+- publishes the result to `action-results` for the Portal to store and display.
 
-- combine the incident with its action result;
-- store incident and action history;
-- display current and previous incidents;
-- translate event IDs into readable descriptions; and
-- send a structured webhook notification.
+## Redis message contracts
 
-## Example service messages
+| Stage | Stream | Redis field | Important data |
+|---|---|---|---|
+| Collector to Analyzer | `log-events` | `data` | `block_id`, `event_id`, `trace_complete` |
+| Analyzer to Portal | `IncidentStream` | `payload` | `incident_id`, `block_id`, `confidence_score`, `severity`, `evidence` |
+| Portal to Executor | `ActionStream` | `command` | `incident_id`, `action` |
+| Executor to Portal | `action-results` | `payload` | `action_result_id`, `incident_id`, `action`, `mode`, `status`, `reason` |
+| Invalid Collector input | `log-events-dead-letter` | record fields | original row and validation reason |
+| Invalid Portal input | `portal-dead-letter` | record fields | source stream, source ID, error and payload |
 
-### Log event
+The same `incident_id` links the AI prediction, Portal record, action request and returned Executor result.
 
-```json
-{
-  "schema_version": "1.0",
-  "line_id": 125,
-  "timestamp": "2008-11-09T20:35:18",
-  "level": "INFO",
-  "component": "DataNode",
-  "block_id": "blk_-123456",
-  "message": "Receiving block..."
-}
-```
+## Dataset and AI approach
 
-### Incident
+The project is based on the [LogHub HDFS_v1 dataset](https://github.com/logpai/loghub/tree/master/HDFS), which contains HDFS log traces labelled as normal or anomalous at block level.
 
-```json
-{
-  "schema_version": "1.0",
-  "incident_id": "inc-001",
-  "block_id": "blk_-123456",
-  "prediction": "anomaly",
-  "anomaly_probability": 0.94,
-  "category": "network_transfer_failure",
-  "severity": "high",
-  "evidence_event_ids": ["E17", "E29"],
-  "recommended_action": "restart_datanode",
-  "model_version": "hdfs-model-1.0"
-}
-```
+The complete dataset is not committed because it is very large. The repository contains only the demonstration data and event mapping needed for the live application:
 
-## Automation policy
+| Repository file | Purpose |
+|---|---|
+| `data/demonstration_traces.csv` | Small set of HDFS traces used for the integrated demonstration |
+| `data/EVENTID_MEANING.csv` | Maps raw HDFS message templates to event IDs |
+| `log-analyser/models/tfidf_vectorizer.pkl` | Saved feature transformer used during inference |
+| `log-analyser/models/logistic_regression_model.pkl` | Saved trained anomaly classifier |
 
-The model does not generate shell commands. It returns an incident result, and the executor selects an action from a reviewed policy.
+### Model training used by the current code
 
-| Incident category | Simulated action | Safety behaviour |
-|---|---|---|
-| Network transfer failure | Restart a DataNode deployment | Requires sufficient confidence and cooldown check |
-| Storage block failure | Run an HDFS block-health check | Diagnostic action only |
-| Metadata failure | Run a NameNode health check | Notify operator before any restart |
-| Replication timeout | Restart or scale a worker | Apply retry and replica limits |
-| Unknown incident | Notify operator only | No command allowed |
+1. Load event sequences and labels from `HDFS.npz`.
+2. Join every event sequence into a space-separated string.
+3. Remove exact duplicate sequences to reduce memorisation leakage.
+4. Create stratified training, validation and test partitions in a `70/15/15` ratio.
+5. Fit TF-IDF on the training sequences only.
+6. Train class-weighted Logistic Regression to handle the smaller anomaly class.
+7. Print a validation classification report and save both fitted objects as `.pkl` files.
 
-## Architecture qualities
+The running Analyzer uses the saved files; it does not retrain the model whenever the application starts.
 
-### Modularity
+For live inference, the current Analyzer uses an anomaly-probability threshold of `0.40`. When a trace crosses that threshold, the Analyzer includes the exact event sequence and event count in its incident message. The Portal uses this information to display supporting evidence and map recognised event IDs to a more specific incident category.
 
-Each microservice has one main responsibility and exchanges versioned JSON messages. The AI model can be changed without rewriting the Log Collector or Automation Executor. The action policy can also be changed without retraining the model.
-
-### Scalability
-
-The Log Analyzer performs the most processing, so it is the first service planned for horizontal scaling. Multiple Analyzer replicas can join the same Redis consumer group and divide incoming block traces between them.
-
-### Fault tolerance
-
-The planned design includes:
-
-- message acknowledgement before completed items are removed;
-- bounded retries for temporary failures;
-- a dead-letter stream for messages that repeatedly fail;
-- unique incident and action IDs to prevent duplicate processing;
-- webhook retry with backoff;
-- health and readiness endpoints; and
-- notification-only behaviour for unknown or low-confidence incidents.
-
-### Maintainability
-
-Shared message schemas will be stored under `contracts/`. Configuration such as replay speed, model path and service URLs will be supplied through environment variables rather than being hard-coded.
-
-## Planned technology stack
+## Technology stack
 
 | Area | Technology |
 |---|---|
-| Language | Python |
-| API services | FastAPI |
-| Dashboard | Streamlit |
-| AI development | pandas and scikit-learn |
-| Message communication | Redis Streams |
-| Incident storage | PostgreSQL or SQLite for the first local version |
-| Containerisation | Docker and Docker Compose |
+| Main language | Python |
+| Collector API | Flask |
+| Portal API | FastAPI and Pydantic |
+| Dashboard | React, Vite, GSAP and Phosphor Icons |
+| Machine learning | pandas, NumPy and scikit-learn |
+| Messaging | Redis Streams |
+| Incident storage | SQLite |
+| Containers | Docker |
 | Orchestration | Kubernetes with Minikube |
 | Version control | Git and GitHub |
 
-## Planned repository structure
+## Repository structure
 
 ```text
 .
-|-- README.md
-|-- requirements.txt
-|-- .env.example
-|-- contracts/
-|   |-- log_event.schema.json
-|   |-- incident.schema.json
-|   `-- action_result.schema.json
-|-- data/
-|   |-- README.md
-|   |-- raw/                  # ignored by Git
-|   `-- demo/
-|-- ml/
-|   |-- train_model.py
-|   `-- evaluate_model.py
-|-- models/                  # generated files, normally ignored
+|-- data/                         # small demonstration data and event mapping
+|-- executor/                     # Ethan's Automation Executor
+|-- kubernetes/                   # Redis and four-service deployment manifests
+|-- log-analyser/                 # Danish's Analyzer, training code and saved model
+|-- log-collector/                # Wei Jie's Collector API and ingestion pipeline
 |-- services/
-|   |-- collector/
-|   |-- analyzer/
-|   |-- executor/
-|   `-- portal/
-|-- tests/
-|-- k8s/
-`-- docker-compose.yml
+|   `-- portal/                   # Minghao's Portal backend, frontend and notifier
+|-- prepare_demo.csv.py           # helper for preparing demonstration traces
+`-- README.md
 ```
 
-## Local development
+## Run the complete application with Minikube
 
-The following is the intended local setup. Commands will be checked and updated when the service code is added.
+This is the recommended full-system demonstration method for the current repository.
+
+### Requirements
+
+- Docker Desktop is installed and running.
+- Python is installed for local helper tools.
+- `kubectl` and Minikube are installed.
+- Ports `8000` and `8080` are available for port forwarding.
 
 ### 1. Clone the repository
 
-```bash
-git clone <repository-url>
-cd <repository-folder>
+```powershell
+git clone https://github.com/10299hao/EGT307-Project.git
+cd EGT307-Project
 ```
 
-### 2. Create the environment file
-
-```bash
-cp .env.example .env
-```
-
-Windows PowerShell:
+### 2. Start Minikube
 
 ```powershell
-Copy-Item .env.example .env
+minikube start --driver=docker
+minikube addons enable metrics-server
 ```
 
-### 3. Add the dataset
+### 3. Build the four application images
 
-Download HDFS_v1 from LogHub and place the required prepared files under the local data directory. Do not commit the full dataset or ZIP archive.
-
-### 4. Install development dependencies
-
-```bash
-python -m venv .venv
-```
-
-Windows PowerShell:
+Run these commands from the repository root:
 
 ```powershell
-.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+$portalVersion = Get-Date -Format "yyyy.MM.dd-HHmm"
+
+docker build -t weijiee/log_collector:latest -f .\log-collector\Dockerfile .
+docker build -t danish/log-analyzer:evidence-v2 .\log-analyser
+docker build -t executor:latest -f .\executor\dockerfile .\executor
+docker build --build-arg PORTAL_VERSION=$portalVersion -t "logsentinel-portal:$portalVersion" .\services\portal
 ```
 
-### 5. Start the complete local application
+`$portalVersion` is generated from the build date and time, so the dashboard and image use the same version without editing `App.jsx` manually.
 
-Once the Dockerfiles and Compose file are implemented:
+### 4. Load the images into Minikube
 
-```bash
-docker compose up --build
+```powershell
+minikube image load weijiee/log_collector:latest
+minikube image load danish/log-analyzer:evidence-v2
+minikube image load executor:latest
+minikube image load "logsentinel-portal:$portalVersion"
 ```
 
-## Docker deployment
+### 5. Deploy the application
 
-Each application microservice will have its own Dockerfile and will be tested independently before integration.
-
-Planned image names:
-
-| Service | Image |
-|---|---|
-| Log Collector | `<dockerhub-user>/logsentinel-collector:<version>` |
-| Log Analyzer | `<dockerhub-user>/logsentinel-analyzer:<version>` |
-| Automation Executor | `<dockerhub-user>/logsentinel-executor:<version>` |
-| Incident Portal | `<dockerhub-user>/logsentinel-portal:<version>` |
-
-Example build:
-
-```bash
-docker build -t <dockerhub-user>/logsentinel-analyzer:latest services/analyzer
-```
-
-Example isolated run:
-
-```bash
-docker run --rm <dockerhub-user>/logsentinel-analyzer:latest
-```
-
-Public registry links and verified commands will replace the placeholders after the images have been tested and pushed.
-
-## Kubernetes deployment
-
-The finished application will be deployed to a local Minikube cluster.
-
-```bash
-minikube start
-kubectl apply -f k8s/
-kubectl get pods
-kubectl get services
-```
-
-The Log Analyzer will be used for the required scaling demonstration:
-
-```bash
-kubectl scale deployment log-analyzer --replicas=3
+```powershell
+kubectl apply -f .\kubernetes\
+kubectl set image deployment/log-analyzer log-analyzer=danish/log-analyzer:evidence-v2
+kubectl set image deployment/incident-portal "incident-portal=logsentinel-portal:$portalVersion"
+kubectl rollout status deployment/log-analyzer
+kubectl rollout status deployment/incident-portal
 kubectl get pods
 ```
 
-Deployment will be considered complete only when all pods are healthy, the services communicate correctly and one full incident can pass through the system.
+All five pods should eventually show `Running`: Redis plus the four application microservices.
 
-## Development milestones
+### 6. Open the Portal and Collector
 
-| Week | Planned result |
-|---|---|
-| Week 14 | Confirm problem, objectives, target users, expected outcomes, dataset and Git repository |
-| Week 15 | Complete the initial architecture and develop the core AI functionality |
-| Week 16 | Implement communicating microservices and verify each Docker container locally |
-| Week 17 | Complete all services, deploy to Minikube and scale the Log Analyzer |
-| Week 18 | Finalise documentation, contribution report, slides and submission files |
-| Week 19 | Present the project, live demo and member-owned code walkthrough |
+Keep each port-forward command running in its own PowerShell window.
 
-## Current progress
+Portal window:
 
-| Item | Status |
-|---|---|
-| Problem statement and industry relevance | Complete |
-| Objectives, target users and outcomes | Complete |
-| Dataset selection and preparation | Complete |
-| Initial microservices architecture | Complete |
-| AI baseline and evaluation | In progress |
-| Microservice implementation | Planned |
-| Docker images | Planned |
-| Minikube deployment and scaling | Planned |
-
-## Team contribution
-
-Replace the placeholders once the team confirms its final ownership.
-
-| Team member | GitHub username | Main responsibility | Owned service/component |
-|---|---|---|---|
-| Member 1 | `@username` | Data preparation and collection | Log Collector |
-| Member 2 | `@username` | Model development and inference | Log Analyzer |
-| Member 3 | `@username` | Automation rules and safety | Automation Executor |
-| Member 4 | `@username` | Dashboard, notification and deployment | Incident Portal |
-
-For a three-person team, the Log Collector owner can also manage the Incident Portal. Every member should still own meaningful code and be able to explain their commits and implementation.
-
-## Version control
-
-Git is used to track project work. Group members should use short feature branches and clear commit messages.
-
-Examples:
-
-```text
-feat(collector): replay HDFS demo logs
-feat(analyzer): add anomaly prediction
-feat(executor): enforce dry-run action policy
-feat(portal): display incident history
-test(analyzer): cover malformed event input
-docs: update Minikube instructions
+```powershell
+kubectl port-forward service/incident-portal 8000:8000
 ```
 
-Large datasets, generated models, `.env` files, passwords and webhook secrets must not be committed.
+Collector window:
 
-## Known issues and limitations
+```powershell
+kubectl port-forward service/log-collector 8080:8080
+```
 
-- HDFS_v1 represents a historical distributed-storage environment rather than every modern cloud platform.
-- The official ground truth is normal or anomaly at block level. Detailed incident categories require separately reviewed rules or annotations.
-- The anomaly class is much smaller than the normal class, so model selection must consider recall, precision and class imbalance.
-- Log replay simulates streaming data and is not a production log agent.
-- All mitigation commands are dry-run actions for the project.
-- A production version would require authentication, role-based access, approval workflows, rollback and stricter audit controls.
-- The deployment target is Minikube rather than a production cloud cluster.
+Open the dashboard at `http://localhost:8000`. API documentation is available at `http://localhost:8000/docs`.
+
+### 7. Upload the demonstration traces
+
+Open one more PowerShell window in the repository root:
+
+```powershell
+curl.exe -X POST http://localhost:8080/ingest -F "file=@.\data\demonstration_traces.csv"
+```
+
+The Collector returns a `job_id`. Copy it and check its progress by replacing `<job-id>` below:
+
+```powershell
+Invoke-RestMethod "http://localhost:8080/ingest/status/<job-id>"
+```
+
+Wait until the job reports `completed`. Refresh the Portal after the job completes. Any traces classified as anomalies should appear as live incidents, followed by their dry-run Executor results.
+
+To verify that a new incident contains real Analyzer evidence:
+
+```powershell
+$incidents = Invoke-RestMethod "http://localhost:8000/api/incidents"
+$latest = $incidents.items | Sort-Object created_at -Descending | Select-Object -First 1
+Invoke-RestMethod "http://localhost:8000/api/incidents/$($latest.incident_id)" | ConvertTo-Json -Depth 8
+```
+
+The result should contain a non-empty `evidence_summary`, `evidence_event_ids` and `total_events_analyzed`. Historical incidents created before the evidence fix remain empty and should not be used to verify the updated Analyzer.
+
+### 8. Verify the services during the demonstration
+
+```powershell
+kubectl get pods
+kubectl get deployments
+kubectl get hpa
+kubectl logs deployment/log-collector --tail=30
+kubectl logs deployment/log-analyzer --tail=30
+kubectl logs deployment/executor-app --tail=30
+kubectl logs deployment/incident-portal --tail=30
+```
+
+### 9. Stop the cluster after the demonstration
+
+```powershell
+minikube stop
+```
+
+`minikube stop` keeps the cluster for the next run. Use `minikube delete` only when the cluster must be removed and recreated.
+
+## Start an existing deployment again
+
+If the images and Kubernetes resources already exist, they do not need to be rebuilt every time:
+
+```powershell
+minikube start --driver=docker
+kubectl get pods
+```
+
+Then start the two port-forwards in separate PowerShell windows:
+
+```powershell
+kubectl port-forward service/incident-portal 8000:8000
+```
+
+```powershell
+kubectl port-forward service/log-collector 8080:8080
+```
+
+If port `8080` is already occupied, first test `http://localhost:8080/health`. A healthy response means an earlier Collector port-forward is already usable. Otherwise, use `kubectl port-forward service/log-collector 8081:8080` and send the upload to port `8081`.
+
+## Update only the Portal UI
+
+A frontend or Portal-backend change requires rebuilding only the Portal image. Use this repeatable PowerShell block so the image tag and displayed Portal version are generated automatically:
+
+```powershell
+$portalVersion = Get-Date -Format "yyyy.MM.dd-HHmm"
+
+docker build --build-arg PORTAL_VERSION=$portalVersion -t "logsentinel-portal:$portalVersion" .\services\portal
+minikube image load "logsentinel-portal:$portalVersion"
+kubectl set image deployment/incident-portal "incident-portal=logsentinel-portal:$portalVersion"
+kubectl rollout status deployment/incident-portal
+```
+
+The Portal rollout replaces the old pod, so restart its port-forward afterwards and refresh the browser with `Ctrl + F5`. The Collector, Analyzer, Executor and Redis do not need to be rebuilt for a Portal-only change.
+
+## Optional Windows desktop alerts
+
+The notification receiver must run directly on the Windows laptop because a Windows dialog cannot be displayed from inside a Linux container.
+
+First create the Portal backend environment if it does not exist:
+
+```powershell
+cd .\services\portal\backend
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+cd ..
+```
+
+Start the receiver and keep its PowerShell window open:
+
+```powershell
+.\tools\local-notifier\start.ps1
+```
+
+Check it locally:
+
+```powershell
+Invoke-RestMethod "http://localhost:8090/health"
+```
+
+For Minikube, configure the Portal with the special hostname that reaches the Windows host:
+
+```powershell
+kubectl set env deployment/incident-portal LOCAL_NOTIFICATION_URL=http://host.minikube.internal:8090/notify
+kubectl rollout status deployment/incident-portal
+```
+
+Add the same environment variable to `kubernetes/incident_portal_deployment.yaml` to keep it after future `kubectl apply` commands. Notifications are sent only when the Portal stores a genuinely new incident; refreshing the browser does not resend alerts for historical incidents.
+
+## Run only the Incident Portal
+
+This mode is useful for dashboard development when Redis and the teammates' services are unavailable. It uses clearly labelled demonstration records.
+
+```powershell
+$portalVersion = Get-Date -Format "yyyy.MM.dd-HHmm"
+docker build --build-arg PORTAL_VERSION=$portalVersion -t "logsentinel-portal:$portalVersion" .\services\portal
+docker run --rm -p 8000:8000 -e ENABLE_REDIS=false -e SEED_DEMO_DATA=true "logsentinel-portal:$portalVersion"
+```
+
+Open `http://localhost:8000`. These records are seeded Portal data, not predictions produced by Danish's running model.
+
+## Useful Portal endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/health/live` | Confirms that the Portal process is alive |
+| `GET /api/health/ready` | Checks the Portal database and Redis readiness |
+| `GET /api/service-status` | Shows integration configuration and available dependencies |
+| `GET /api/incidents` | Returns searchable incident history |
+| `GET /api/incidents/{incident_id}` | Returns one incident and related action/notification details |
+| `POST /api/incidents/{incident_id}/acknowledge` | Records the operator acknowledgement |
+| `GET /api/stats` | Returns dashboard summary values |
+| `POST /api/ingest/incident` | Accepts a test Analyzer incident over HTTP |
+| `POST /api/ingest/action-result` | Accepts a test Executor result over HTTP |
+
+## Safety and reliability decisions
+
+- The AI model returns a prediction, not a shell command.
+- The Portal maps incidents to a fixed set of known response names.
+- The Executor runs only a simulation and labels every result `dry_run`.
+- The Collector retries temporary Redis failures and records invalid rows separately.
+- The Portal validates incoming messages before writing them to SQLite.
+- Duplicate incident/action handling reduces repeated work during message replay.
+- Redis consumer groups are used by the Portal so successfully stored messages can be acknowledged.
+- Health and readiness probes are included in the Kubernetes manifests.
+- SQLite is stored through a Kubernetes persistent-volume claim for the Portal prototype.
+
+## Current limitations
+
+- HDFS_v1 is a historical HDFS dataset; it does not represent every modern cloud platform.
+- Log streaming is simulated through CSV upload rather than a production log agent.
+- The Analyzer keeps incomplete block buffers in memory, so an Analyzer restart can lose a partial trace.
+- The Analyzer HPA manifest demonstrates autoscaling configuration, but Redis consumer-group coordination should be added before relying on multiple Analyzer replicas for production processing.
+- Exact duplicate event sequences are separated before training, but stronger split evidence using retained `block_id` values should be added to the model evaluation report.
+- The current training script prints validation metrics but does not save the confusion matrix and full test report as repository artifacts.
+- SQLite is suitable for one Portal replica in this prototype; a shared database is required for multiple production replicas.
+- Authentication, role-based access, approval workflows and rollback are outside the current prototype.
+- `services/portal/docker-compose.yml` is not the recommended full-system launcher in this revision because some of its historical wrapper Dockerfile paths were removed. Use the Minikube procedure above for the integrated demonstration.
 
 ## Future improvements
 
-- Connect the Collector to a real log source.
-- Add authenticated users and role-based access.
-- Add approval and rollback workflows for higher-risk actions.
-- Compare sequence-aware deep-learning models.
-- Add monitoring for model drift.
-- Support other infrastructure datasets and cloud platforms.
-- Deploy the application to a managed Kubernetes environment.
+- Use Redis consumer groups in the Analyzer for safe horizontal processing.
+- Persist partial trace buffers so the Analyzer can recover after restart.
+- Save the complete AI evaluation report, confusion matrix and test metrics.
+- Add authenticated users, roles and approval rules for higher-risk actions.
+- Add retry/cooldown policies and an audit view for automated actions.
+- Support live log agents and additional infrastructure datasets.
+- Replace SQLite with PostgreSQL for a multi-replica deployment.
 
 ## References
 

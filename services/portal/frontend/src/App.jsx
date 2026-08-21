@@ -91,7 +91,7 @@ function Topbar({ activeView, lastUpdated, loading, services, incidents, notific
           <button className={`account-trigger ${accountOpen ? "active" : ""}`} onClick={onToggleAccount} aria-label="Open operator information" aria-expanded={accountOpen}><span>M</span><b>Minghao</b></button>
           {accountOpen && <div className="topbar-popover account-popover">
             <div className="operator-summary"><span>M</span><div><b>Minghao</b><small>Portal operator</small></div></div>
-            <dl><div><dt>Environment</dt><dd>HDFS simulation</dd></div><div><dt>Data source</dt><dd>{services.mode}</dd></div><div><dt>Portal version</dt><dd>1.0.0</dd></div></dl>
+            <dl><div><dt>Environment</dt><dd>HDFS simulation</dd></div><div><dt>Data source</dt><dd>{services.mode}</dd></div><div><dt>Portal version</dt><dd>{import.meta.env.VITE_PORTAL_VERSION || "local-dev"}</dd></div></dl>
           </div>}
         </div>
       </div>
@@ -161,10 +161,8 @@ function ServicePanel({ services, onOpenSystem }) {
     ["Incident database", services.database, Database],
     ["Redis Streams", services.redis, HardDrives],
     ["Log Collector", services.collector, Broadcast],
-    ["Contract bridge", services.integration_bridge, Stack],
     ["AI Analyzer", services.analyzer, Brain],
     ["Automation Executor", services.executor, Lightning],
-    ["Desktop alerts", services.local_notifications, Broadcast],
   ];
   return (
     <article className="panel service-panel">

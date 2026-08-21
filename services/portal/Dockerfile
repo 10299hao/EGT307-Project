@@ -1,4 +1,6 @@
 FROM node:22-alpine AS frontend-builder
+ARG PORTAL_VERSION=local-dev
+ENV VITE_PORTAL_VERSION=$PORTAL_VERSION
 WORKDIR /build/frontend
 RUN corepack enable
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./

@@ -1,10 +1,20 @@
-"""Compatibility adapters for messages produced by the team microservices."""
+"""
+Convert Analyzer's output into the portal standard data format
 
-from hashlib import sha256
+├── extract event IDs
+├── determine incident category
+├── convert confidence
+├── generate incident ID
+└── select recommended action
+
+"""
+
+from hashlib import sha256     #consistent identifier
 import re
-from typing import Any
+from typing import Any    
 
 
+#event id --> incident categories
 CATEGORY_RULES = (
     ("network_transfer_failure", {"E4", "E7", "E10", "E12", "E14", "E17"}),
     ("replication_timeout", {"E24", "E25", "E29"}),
@@ -12,6 +22,7 @@ CATEGORY_RULES = (
     ("metadata_failure", {"E15", "E22", "E26", "E28"}),
 )
 
+#each incident cat --> recommended actions
 ACTION_BY_CATEGORY = {
     "network_transfer_failure": "restart_datanode",
     "replication_timeout": "check_replication_health",
@@ -20,7 +31,7 @@ ACTION_BY_CATEGORY = {
     "hdfs_anomaly": "notify_operator",
 }
 
-
+#Checking
 def _event_ids(raw_evidence: Any) -> list[str]:
     if isinstance(raw_evidence, list):
         values = raw_evidence
@@ -29,6 +40,7 @@ def _event_ids(raw_evidence: Any) -> list[str]:
     return list(dict.fromkeys(str(value).strip().upper() for value in values if str(value).strip()))
 
 
+#event id --> category
 def _category(event_ids: list[str]) -> str:
     evidence = set(event_ids)
     for category, matching_events in CATEGORY_RULES:
@@ -36,21 +48,15 @@ def _category(event_ids: list[str]) -> str:
             return category
     return "hdfs_anomaly"
 
-
+#analyser % --> 0-1
 def _probability(value: Any) -> float:
-    """Accept either Danish's percentage or the Portal's 0-to-1 format."""
     confidence = float(value)
     if confidence > 1:
         confidence /= 100
     return confidence
 
-
+#analyser output --> portal incident formaat
 def normalise_analyzer_incident(payload: dict[str, Any]) -> dict[str, Any]:
-    """Convert Danish's current Analyzer output into the portal Incident contract.
-
-    The adapter is intentionally backward compatible: messages which already
-    follow the shared Incident schema pass through unchanged.
-    """
     if "anomaly_probability" in payload and "incident_id" in payload:
         return payload
 
@@ -63,7 +69,6 @@ def normalise_analyzer_incident(payload: dict[str, Any]) -> dict[str, Any]:
     evidence_summary = str(payload.get("evidence") or "").strip()
     event_ids = _event_ids(evidence_summary)
     category = _category(event_ids)
-    # A stable fingerprint makes replayed Analyzer messages idempotent.
     fingerprint = f"{payload['block_id']}|{evidence_summary}".encode("utf-8")
     incident_id = payload.get("incident_id") or f"INC-{sha256(fingerprint).hexdigest()[:12].upper()}"
 

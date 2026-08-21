@@ -41,6 +41,8 @@ def evaluate_trace(block_id, event_list):
             "status": "Anomaly",
             "confidence_score": float(confidence),
             "severity": severity,
+            "total_events_analyzed": len(event_list),
+            "evidence": sequence_str,
         }
         print(f"🚨 ANOMALY DETECTED: {block_id} (Confidence: {confidence}%)")
         return incident

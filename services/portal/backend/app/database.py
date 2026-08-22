@@ -1,4 +1,4 @@
-"""SQLite persistence and queries for incidents, actions and notifications."""
+"""SQLite for incidents, actions and notifications."""
 
 import json
 from pathlib import Path
@@ -41,9 +41,8 @@ EVENT_DESCRIPTIONS = {
     "E29": "Pending block replication timed out",
 }
 
-
+#contains all the database operations
 class PortalDatabase:
-    """Thread-safe repository used by both FastAPI routes and Redis consumers."""
 
     def __init__(self, path: str):
         self.path = path
@@ -123,7 +122,7 @@ class PortalDatabase:
                 connection.execute("ALTER TABLE incidents ADD COLUMN action_request_error TEXT")
 
     def upsert_incident(self, incident: IncidentIn) -> bool:
-        """Insert/update an incident and return True only for a new record."""
+        #Insert/update an incident and return True only for a new record.
         payload = incident.model_dump()
         with self._lock, self.connect() as connection:
             existed = connection.execute(
@@ -203,14 +202,14 @@ class PortalDatabase:
                    WHERE incident_id=?""",
                 (request_id, utc_now() if request_id else None, error, incident_id),
             )
-
+    #check whther action req sent for incident
     def action_already_dispatched(self, incident_id: str) -> bool:
         with self.connect() as connection:
             row = connection.execute(
                 "SELECT action_request_id FROM incidents WHERE incident_id=?", (incident_id,)
             ).fetchone()
         return bool(row and row["action_request_id"])
-
+    #convert raw sqlite to clean dict
     @staticmethod
     def _to_incident(row: sqlite3.Row) -> dict[str, Any]:
         item = dict(row)

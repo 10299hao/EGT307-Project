@@ -15,11 +15,8 @@ from .schemas import ActionResultIn, IncidentIn
 
 
 logger = logging.getLogger(__name__)
-
-
+#consume Analyzer incidents and Executor results from Redis
 class StreamConsumer:
-    """Reliably consume Analyzer incidents and Executor results from Redis."""
-
     def __init__(self, database: PortalDatabase, config: Settings):
         self.database = database
         self.config = config
@@ -27,7 +24,6 @@ class StreamConsumer:
         self.running = False
 
     async def ensure_groups(self) -> None:
-        """Create consumer groups once; BUSYGROUP means they already exist."""
         for stream in (*self.config.incident_streams, self.config.action_result_stream):
             try:
                 await self.redis.xgroup_create(stream, self.config.consumer_group, id="0", mkstream=True)
@@ -36,15 +32,6 @@ class StreamConsumer:
                     raise
 
     async def run(self) -> None:
-        """Poll all Portal input streams until application shutdown.
-
-        Wrapped in a retry loop: a transient Redis issue (brief network
-        blip, not-ready-yet on startup, etc.) must not permanently kill
-        this background task. Without this, an unhandled exception here
-        silently ends the task forever with nothing printed anywhere,
-        while the rest of the app keeps running and just never
-        receives any data again.
-        """
         self.running = True
         while self.running:
             try:
@@ -81,8 +68,6 @@ class StreamConsumer:
                 self.database.upsert_action_result(ActionResultIn.model_validate(payload))
             await self.redis.xack(stream, self.config.consumer_group, message_id)
         except (json.JSONDecodeError, ValidationError, ValueError, TypeError) as exc:
-            # Preserve malformed upstream messages for diagnosis rather than
-            # crashing the consumer or silently dropping the payload.
             await self.redis.xadd(
                 self.config.dead_letter_stream,
                 {"source_stream": stream, "source_id": message_id, "error": str(exc), "payload": json.dumps(fields)},

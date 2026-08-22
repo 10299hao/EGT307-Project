@@ -25,8 +25,8 @@ The project works like a small incident-response team:
 
 1. The **Log Collector** reads and checks the HDFS log records.
 2. The **Log Analyzer** uses the AI model to decide whether each completed block trace is normal or anomalous.
-3. The **Incident Portal** saves an anomaly, shows it to the operator and requests a suitable dry-run action.
-4. The **Automation Executor** simulates the action and reports the result to the Portal.
+3. The **Incident Portal** saves the anomaly and displays it to the operator.
+4. The **Automation Executor** validates the same anomaly, selects a safe response, simulates it in dry-run mode and reports the result to the Portal.
 
 Redis Streams acts as the shared message channel. Each microservice runs independently and does not need to import another member's source code.
 
@@ -42,7 +42,6 @@ flowchart LR
     Portal["Incident Portal<br/>Minghao"]
     Database[("SQLite incident history")]
     Dashboard["Operator dashboard"]
-    ActionStream[("Redis: ActionStream")]
     Executor["Automation Executor<br/>Ethan"]
     ResultStream[("Redis: action-results")]
     Notification["Optional desktop alert"]
@@ -52,11 +51,10 @@ flowchart LR
     LogStream --> Analyzer
     Analyzer -->|"payload"| IncidentStream
     IncidentStream --> Portal
+    IncidentStream --> Executor
     Portal --> Database
     Portal --> Dashboard
     Portal --> Notification
-    Portal -->|"command"| ActionStream
-    ActionStream --> Executor
     Executor -->|"payload"| ResultStream
     ResultStream --> Portal
 ```
@@ -70,19 +68,19 @@ flowchart LR
 5. The saved TF-IDF vectorizer converts the event sequence into numerical features.
 6. Logistic Regression predicts whether the trace is normal or anomalous.
 7. Normal traces are logged and require no response. Anomalies are published to `IncidentStream` with a confidence score and evidence.
-8. The Portal converts the Analyzer message into its validated incident format, stores it in SQLite and displays it on the dashboard.
-9. The Portal maps the incident category to an approved action and publishes the request to `ActionStream`.
-10. The Executor simulates the action in dry-run mode and publishes an `ActionResult` to `action-results`.
+8. The Portal validates the Analyzer message, stores it in SQLite and displays it on the dashboard.
+9. The Executor independently consumes the same `IncidentStream` payload, validates it and checks Redis for duplicate incident IDs. Invalid payloads are stored in `executor-dead-letter`.
+10. The Executor selects an approved response based on status, confidence and severity, simulates it in dry-run mode and publishes an `ActionResult` to `action-results`.
 11. The Portal joins the result to the original incident using `incident_id`. The operator can inspect and acknowledge the completed record.
 
 ## Team responsibilities
 
 | Team member | Owned microservice | Main work completed |
 |---|---|---|
-| **Minghao** | Incident Portal | FastAPI backend, SQLite storage, React dashboard, Redis consumers, Analyzer adapter, Executor request publishing, incident acknowledgement and optional desktop alerts |
+| **Minghao** | Incident Portal | FastAPI backend, SQLite storage, React dashboard, Redis consumers, Analyzer adapter, Executor result consumption, incident acknowledgement and optional desktop alerts |
 | **Danish** | Log Analyzer and AI model | Block buffering, TF-IDF preprocessing, Logistic Regression training/inference, confidence scoring, evidence reporting and anomaly publishing |
 | **Wei Jie** | Log Collector | File-upload API, record validation, HDFS event-template mapping, configurable replay, retry handling and dead-letter publishing |
-| **Ethan** | Automation Executor | Action request consumer, dry-run response simulation and action-result publishing back to the Portal |
+| **Ethan** | Automation Executor | Incident validation, confidence and severity-based action selection, dry-run simulation, persistent duplicate protection, dead-letter handling, structured logging, Redis metrics and action-result publishing |
 
 ## Implemented microservices
 
@@ -124,34 +122,59 @@ Main functions:
 - prevents duplicate incident and action processing;
 - provides overview, incident history, activity and system-status pages;
 - lets the operator search, filter, inspect and acknowledge incidents;
-- sends action requests to Ethan's Executor; and
+- consumes dry-run results from Ethan's Executor through `action-results` and links them to the corresponding incidents; and
 - can call a local Windows notification receiver for new incidents.
 
 More Portal-specific details are available in [`services/portal/PORTAL_README.md`](services/portal/PORTAL_README.md).
 
 ### 4. Automation Executor
 
-The Executor listens for approved requests from the Portal. It does not accept an AI-generated shell command and does not make a real infrastructure change.
+The Executor listens directly for Analyzer incidents published to `IncidentStream`. It validates each incident, selects an approved response based on its status, confidence and severity, and simulates the response without executing unrestricted infrastructure commands.
 
 Main functions:
 
-- consumes `incident_id` and `action` from `ActionStream`;
-- simulates the response steps in dry-run mode;
-- creates a versioned action result with a unique ID and timestamp; and
-- publishes the result to `action-results` for the Portal to store and display.
+- consumes incident payloads from `IncidentStream`;
+- validates required fields, data types, accepted values and confidence range;
+- sends invalid messages to `executor-dead-letter` for investigation;
+- prevents duplicate processing by storing incident IDs in Redis for a configurable period;
+- selects `isolate_node`, `notify_operator`, `monitor_incident` or `no_action`;
+- simulates the selected response in dry-run mode;
+- publishes a versioned result to `action-results`;
+- records structured JSON logs; and
+- maintains Redis metric counters for received, processed, invalid, duplicate and dead-lettered messages.
+
+| Incident condition | Selected response |
+|---|---|
+| Status is not anomaly | `no_action` |
+| Confidence is below the configured threshold | `monitor_incident` |
+| Severity is Critical or High | `isolate_node` |
+| Severity is Medium | `notify_operator` |
+| Other valid anomaly | `monitor_incident` |
+
+#### Executor configuration
+
+| Environment variable | Default | Purpose |
+|---|---:|---|
+| `REDIS_HOST` | `localhost` | Redis server hostname; Kubernetes sets this to `redis` |
+| `REDIS_PORT` | `6379` | Redis server port |
+| `REDIS_SOCKET_TIMEOUT` | `10` | Maximum Redis socket wait in seconds |
+| `CONFIDENCE_THRESHOLD` | `70` | Minimum confidence for severity-based action selection |
+| `PROCESSED_TTL_SECONDS` | `86400` | Time that a processed incident ID remains protected from duplicates |
+| `METRICS_KEY` | `executor:metrics` | Redis hash used for metric counters |
+| `DEAD_LETTER_STREAM` | `executor-dead-letter` | Redis stream used for rejected messages |
 
 ## Redis message contracts
 
 | Stage | Stream | Redis field | Important data |
 |---|---|---|---|
 | Collector to Analyzer | `log-events` | `data` | `block_id`, `event_id`, `trace_complete` |
-| Analyzer to Portal | `IncidentStream` | `payload` | `incident_id`, `block_id`, `confidence_score`, `severity`, `evidence` |
-| Portal to Executor | `ActionStream` | `command` | `incident_id`, `action` |
+| Analyzer to Portal and Executor | `IncidentStream` | `payload` | `incident_id`, `block_id`, `status`, `confidence_score`, `severity`, `evidence` |
+| Invalid Executor input | `executor-dead-letter` | `payload` | original message ID, validation reason, raw payload and timestamp |
 | Executor to Portal | `action-results` | `payload` | `action_result_id`, `incident_id`, `action`, `mode`, `status`, `reason` |
 | Invalid Collector input | `log-events-dead-letter` | record fields | original row and validation reason |
 | Invalid Portal input | `portal-dead-letter` | record fields | source stream, source ID, error and payload |
 
-The same `incident_id` links the AI prediction, Portal record, action request and returned Executor result.
+The same `incident_id` links the AI prediction, Portal record and returned Executor result.
 
 ## Dataset and AI approach
 
@@ -328,6 +351,14 @@ kubectl logs deployment/executor-app --tail=30
 kubectl logs deployment/incident-portal --tail=30
 ```
 
+To inspect the Executor's structured logs, metrics and rejected messages:
+
+```powershell
+kubectl logs deployment/executor-app --tail=30
+kubectl exec deployment/redis -- redis-cli HGETALL executor:metrics
+kubectl exec deployment/redis -- redis-cli XREVRANGE executor-dead-letter + - COUNT 5
+```
+
 ### 9. Stop the cluster after the demonstration
 
 ```powershell
@@ -435,8 +466,11 @@ Open `http://localhost:8000`. These records are seeded Portal data, not predicti
 ## Safety and reliability decisions
 
 - The AI model returns a prediction, not a shell command.
-- The Portal maps incidents to a fixed set of known response names.
+- The Executor validates every incident and selects only from a fixed set of approved dry-run responses.
 - The Executor runs only a simulation and labels every result `dry_run`.
+- Invalid Executor messages are preserved in `executor-dead-letter` instead of being silently discarded.
+- Processed incident IDs are stored temporarily in Redis to prevent duplicate execution after pod restarts.
+- Structured JSON logs and Redis metric counters support troubleshooting and operational monitoring.
 - The Collector retries temporary Redis failures and records invalid rows separately.
 - The Portal validates incoming messages before writing them to SQLite.
 - Duplicate incident/action handling reduces repeated work during message replay.
@@ -450,6 +484,12 @@ Open `http://localhost:8000`. These records are seeded Portal data, not predicti
 - Log streaming is simulated through CSV upload rather than a production log agent.
 - The Analyzer keeps incomplete block buffers in memory, so an Analyzer restart can lose a partial trace.
 - The Analyzer HPA manifest demonstrates autoscaling configuration, but Redis consumer-group coordination should be added before relying on multiple Analyzer replicas for production processing.
+- The Executor performs dry-run simulations only and does not execute real infrastructure actions.
+- The Executor currently processes incidents sequentially and does not use a Redis consumer group for horizontal scaling.
+- The Executor starts from new stream messages when it launches, so incidents published while it is offline are not automatically replayed.
+- Duplicate protection is based on `incident_id` and expires after the configured TTL, which defaults to 24 hours.
+- Executor metrics and dead-letter records are available through Redis commands but are not currently displayed on the Portal dashboard.
+- Executor duplicate keys, metrics and dead letters depend on Redis data persistence.
 - Exact duplicate event sequences are separated before training, but stronger split evidence using retained `block_id` values should be added to the model evaluation report.
 - The current training script prints validation metrics but does not save the confusion matrix and full test report as repository artifacts.
 - SQLite is suitable for one Portal replica in this prototype; a shared database is required for multiple production replicas.
@@ -465,6 +505,10 @@ Open `http://localhost:8000`. These records are seeded Portal data, not predicti
 - Add retry/cooldown policies and an audit view for automated actions.
 - Support live log agents and additional infrastructure datasets.
 - Replace SQLite with PostgreSQL for a multi-replica deployment.
+- Move the Executor to a Redis consumer group with acknowledgements and recovery of pending incidents.
+- Add a Portal view for Executor metrics and dead-letter inspection.
+- Add controlled dead-letter replay after an operator corrects an invalid message.
+- Use atomic Redis processing locks before scaling the Executor to multiple replicas.
 
 ## References
 

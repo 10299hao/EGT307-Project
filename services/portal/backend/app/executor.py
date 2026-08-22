@@ -1,4 +1,4 @@
-"""Portal-side client for Ethan's Redis-based Automation Executor."""
+#send action requests to executor
 
 import json
 

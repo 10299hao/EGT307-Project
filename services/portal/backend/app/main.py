@@ -1,3 +1,5 @@
+#central coordinator: starts the Portal, connects to Redis and SQLite, 
+# defines the REST API,erves the dashboard frontend.
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -10,26 +12,25 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
-from .adapters import normalise_analyzer_incident
-from .config import settings
-from .consumer import StreamConsumer
-from .database import PortalDatabase
+from .adapters import normalise_analyzer_incident  #Converts analyser output into Portal format
+from .config import settings #read env var n config
+from .consumer import StreamConsumer #listen to redis stream
+from .database import PortalDatabase #handle sqlite op
 from .demo_data import seed
-from .executor import dispatch_action_request
+from .executor import dispatch_action_request #publish action req to executor
 from .notifications import send_local_notification
 from .schemas import AcknowledgeIn, ActionResultIn, IncidentIn
 
 logging.basicConfig(level=logging.INFO)
 
-
+#database connection manager
 database = PortalDatabase(settings.database_path)
 consumer: StreamConsumer | None = None
 consumer_task: asyncio.Task | None = None
 
-
+#application startup and shutdown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Prepare storage/Redis on startup and close cleanly on shutdown."""
     global consumer, consumer_task
     if settings.seed_demo_data:
         seed(database)

@@ -1,4 +1,4 @@
-"""Best-effort delivery to the optional Windows notification receiver."""
+#window notification
 
 import asyncio
 
